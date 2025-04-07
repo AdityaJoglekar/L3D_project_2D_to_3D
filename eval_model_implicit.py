@@ -3,6 +3,7 @@ import time
 import torch
 # from model import SingleViewto3D
 from model_implicit import SingleViewto3D
+# from model_implicit_OccNet import SingleViewto3D
 from r2n2_custom import R2N2
 from  pytorch3d.datasets.r2n2.utils import collate_batched_R2N2
 import dataset_location
@@ -35,9 +36,10 @@ def get_args_parser():
     parser.add_argument('--w_chamfer', default=1.0, type=float)
     parser.add_argument('--w_smooth', default=0.1, type=float)  
     parser.add_argument('--load_checkpoint', action='store_true')  
-    parser.add_argument('--device', default='cuda:1', type=str) 
+    parser.add_argument('--device', default='cuda:2', type=str) 
     parser.add_argument('--load_feat', action='store_true') 
     parser.add_argument("--num_samples", default=32*32*32, type=int)
+    parser.add_argument("--model_name", default="Perceiver_AdaLN", type=str)
     return parser
 
 def preprocess(feed_dict, args):
@@ -59,7 +61,7 @@ def save_plot(thresholds, avg_f1_score, args):
     ax.set_ylabel('F1-score')
     ax.set_title(f'Evaluation {args.type}')
     # plt.savefig(f'eval_{args.type}', bbox_inches='tight')
-    plt.savefig(f'eval_{args.type}_implicit', bbox_inches='tight')
+    plt.savefig(f'eval_{args.type}_{args.model_name}_implicit', bbox_inches='tight')
 
 
 def compute_sampling_metrics(pred_points, gt_points, thresholds, eps=1e-8):
@@ -157,7 +159,7 @@ def evaluate_model(args):
 
     if args.load_checkpoint:
         # checkpoint = torch.load(f'checkpoint_{args.type}.pth')
-        checkpoint = torch.load(f'checkpoint_implicit.pth')
+        checkpoint = torch.load(f'checkpoint_implicit_{args.model_name}.pth')
         model.load_state_dict(checkpoint['model_state_dict'])
         print(f"Succesfully loaded iter {start_iter}")
     
@@ -200,7 +202,7 @@ def evaluate_model(args):
                 renderer = get_mesh_renderer(image_size=256, device=args.device)
                 rend = renderer(pred.to(args.device), cameras=cameras, lights=lights)
                 rend = rend[0, ..., :3].detach().cpu().numpy().clip(0, 1)
-                plt.imsave(f'vis/{step}_implicit.png', rend)
+                plt.imsave(f'vis/{step}_implicit_{args.model_name}.png', rend)
             except:
                 pred = pytorch3d.ops.cubify(voxels_src,thresh = 0.3)
                 color=[0.7, 0.7, 1]   
@@ -210,7 +212,7 @@ def evaluate_model(args):
                 renderer = get_mesh_renderer(image_size=256, device=args.device)
                 rend = renderer(pred.to(args.device), cameras=cameras, lights=lights)
                 rend = rend[0, ..., :3].detach().cpu().numpy().clip(0, 1)
-                plt.imsave(f'vis/{step}_implicit.png', rend)
+                plt.imsave(f'vis/{step}_implicit_{args.model_name}.png', rend)
 
 
 
