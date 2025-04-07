@@ -5,6 +5,7 @@ import dataset_location
 import losses
 import torch
 from model_implicit import SingleViewto3D
+# from model_implicit_OccNet import SingleViewto3D
 from pytorch3d.datasets.r2n2.utils import collate_batched_R2N2
 from pytorch3d.ops import sample_points_from_meshes
 from r2n2_custom import R2N2
@@ -31,9 +32,10 @@ def get_args_parser():
     # parser.add_argument("--save_freq", default=2000, type=int)
     parser.add_argument("--save_freq", default=100, type=int)
     parser.add_argument("--load_checkpoint", action="store_true")
-    parser.add_argument('--device', default='cuda:1', type=str) 
+    parser.add_argument('--device', default='cuda:2', type=str) 
     parser.add_argument('--load_feat', action='store_true') 
     parser.add_argument("--num_samples", default=4096, type=int)
+    parser.add_argument("--model_name", default="Perceiver_AdaLN", type=str)
     return parser
 
 
@@ -177,6 +179,7 @@ def train_model(args):
     start_time = time.time()
 
     if args.load_checkpoint:
+        print('HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH')
         checkpoint = torch.load(f"checkpoint_{args.type}.pth")
         model.load_state_dict(checkpoint["model_state_dict"])
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
@@ -233,7 +236,7 @@ def train_model(args):
                     "model_state_dict": model.state_dict(),
                     "optimizer_state_dict": optimizer.state_dict(),
                 },
-                f"checkpoint_{args.type}.pth",
+                f"checkpoint_{args.type}_{args.model_name}.pth",
             )
 
         print(
