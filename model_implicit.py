@@ -13,6 +13,7 @@ import torch
 import numpy as np
 import torch.nn as nn
 # from timm.models.layers import trunc_normal_
+import timm
 from einops import rearrange, repeat
 
 ACTIVATION = {'gelu': nn.GELU, 'tanh': nn.Tanh, 'sigmoid': nn.Sigmoid, 'relu': nn.ReLU, 'leaky_relu': nn.LeakyReLU(0.1),
@@ -52,7 +53,7 @@ class Down_Cross_Attn(nn.Module):
     def __init__(self, hidden_dim = 128, heads=8, dim_head=16, dropout=0., latent_num=64, mlp_ratio = 1):
         super().__init__()
         # act='gelu'
-        act='approx_gelu'
+        act='relu'
         self.dim_head = dim_head
         self.heads = heads
         self.hidden_dim = hidden_dim
@@ -70,7 +71,8 @@ class Down_Cross_Attn(nn.Module):
         self.q_weights = nn.Parameter(torch.nn.init.trunc_normal_(torch.zeros((1,self.heads, self.g, self.dim_head)), mean=0, std=0.02, a=-2, b=2))
         self.to_out = nn.Linear(hidden_dim, hidden_dim)
         self.adaLN_modulation = nn.Sequential(
-            nn.SiLU(),
+            # nn.SiLU(),
+            nn.ReLU(),
             nn.Linear(hidden_dim, 6 * hidden_dim, bias=True)
         )
 
@@ -95,7 +97,7 @@ class Latent_Attn(nn.Module):
     def __init__(self, hidden_dim = 128, heads=8, dim_head=16, dropout=0., latent_num=64, mlp_ratio = 1):
         super().__init__()
         # act='gelu'
-        act='approx_gelu'
+        act='relu'
         self.dim_head = dim_head
         self.heads = heads
         self.hidden_dim = hidden_dim
@@ -113,7 +115,8 @@ class Latent_Attn(nn.Module):
         self.to_v = nn.Linear(hidden_dim, hidden_dim,bias = False)
         self.to_out = nn.Linear(hidden_dim, hidden_dim)
         self.adaLN_modulation = nn.Sequential(
-            nn.SiLU(),
+            # nn.SiLU(),
+            nn.ReLU(),
             nn.Linear(hidden_dim, 6 * hidden_dim, bias=True)
         )
 
@@ -139,7 +142,7 @@ class Up_Cross_Attn(nn.Module):
     def __init__(self, hidden_dim = 128, heads=8, dim_head=16, dropout=0., latent_num = 64, mlp_ratio = 1):
         super().__init__()
         # act='gelu'
-        act='approx_gelu'
+        act='relu'
         self.dim_head = dim_head
         self.heads = heads
         self.hidden_dim = hidden_dim
@@ -157,7 +160,8 @@ class Up_Cross_Attn(nn.Module):
         self.in_project_q = nn.Linear(hidden_dim, hidden_dim,bias = False)
         self.to_out = nn.Linear(hidden_dim, hidden_dim)
         self.adaLN_modulation = nn.Sequential(
-            nn.SiLU(),
+            # nn.SiLU(),
+            nn.ReLU(),
             nn.Linear(hidden_dim, 6 * hidden_dim, bias=True)
         )
 
@@ -187,7 +191,7 @@ class Attention_Model(nn.Module):
                  n_hidden=256,
                  dropout=0,
                  n_head=8,
-                 act='gelu',
+                 act='relu',
                  mlp_ratio=1,
                  latent_num=32,
                  ):
@@ -233,24 +237,67 @@ class Attention_Model(nn.Module):
         return x
 
 
+class HarmonicEmbedding(torch.nn.Module):
+    def __init__(
+        self,
+        in_channels: int = 3,
+        n_harmonic_functions: int = 6,
+        omega0: float = 1.0,
+        logspace: bool = True,
+        include_input: bool = True,
+    ) -> None:
+        super().__init__()
 
+        if logspace:
+            frequencies = 2.0 ** torch.arange(
+                n_harmonic_functions,
+                dtype=torch.float32,
+            )
+        else:
+            frequencies = torch.linspace(
+                1.0,
+                2.0 ** (n_harmonic_functions - 1),
+                n_harmonic_functions,
+                dtype=torch.float32,
+            )
+
+        self.register_buffer("_frequencies", omega0 * frequencies, persistent=False)
+        self.include_input = include_input
+        self.output_dim = n_harmonic_functions * 2 * in_channels
+
+        if self.include_input:
+            self.output_dim += in_channels
+
+    def forward(self, x: torch.Tensor):
+        embed = (x[..., None] * self._frequencies).view(*x.shape[:-1], -1)
+
+        if self.include_input:
+            return torch.cat((embed.sin(), embed.cos(), x), dim=-1)
+        else:
+            return torch.cat((embed.sin(), embed.cos()), dim=-1)
 
 
 class Preprocessing_Model(nn.Module):
     def __init__(self,
                  input_dim=3,
                  n_hidden=512,
-                 act='gelu',
+                 act='relu',
                  k = 10
                  ):
         super(Preprocessing_Model, self).__init__()
 
-        self.preprocess = MLP(input_dim, n_hidden, n_hidden, n_layers=0, res=False, act=act)
+        # self.preprocess = MLP(input_dim, n_hidden, n_hidden, n_layers=0, res=False, act=act)
+        self.preprocess = nn.Linear(input_dim,n_hidden)
+        
         # self.preprocess_c = MLP(k, n_hidden * 2, n_hidden, n_layers=0, res=False, act=act)
         # self.preprocess_c = nn.Linear(k, n_hidden)
+        # self.harmonic_embedding_xyz = HarmonicEmbedding(3, 6)
+        # embedding_dim_xyz = self.harmonic_embedding_xyz.output_dim
+        # self.preprocess = nn.Linear(embedding_dim_xyz,n_hidden)
+        # self.preprocess = MLP(embedding_dim_xyz, n_hidden, n_hidden, n_layers=0, res=False, act=act)
 
         self.initialize_weights()
-        self.placeholder = nn.Parameter((1 / (n_hidden)) * torch.rand(n_hidden, dtype=torch.float))
+        # self.placeholder = nn.Parameter((1 / (n_hidden)) * torch.rand(n_hidden, dtype=torch.float))
 
     def initialize_weights(self):
         self.apply(self._init_weights)
@@ -265,9 +312,11 @@ class Preprocessing_Model(nn.Module):
             nn.init.constant_(m.weight, 1.0)
 
     def forward(self, x):
+        # x = self.harmonic_embedding_xyz(x)
         x = self.preprocess(x)
         # c = self.preprocess_c(c)
-        x = x + self.placeholder[None, None, :]
+        # x = x + self.placeholder[None, None, :]
+
 
         return x
 
@@ -280,7 +329,8 @@ class Postprocess_layer(nn.Module):
         self.norm_final = nn.LayerNorm(hidden_dim, elementwise_affine=False, eps=1e-6)
         self.linear = nn.Linear(hidden_dim, out_dim)
         self.adaLN_modulation = nn.Sequential(
-            nn.SiLU(),
+            # nn.SiLU(),
+            nn.ReLU(),
             nn.Linear(hidden_dim, 2 * hidden_dim, bias=True)
         )
         self.sigmoid = nn.Sigmoid()
@@ -313,11 +363,11 @@ class Postprocessing_Model(nn.Module):
             torch.nn.init.xavier_uniform_(m.weight)
             if isinstance(m, nn.Linear) and m.bias is not None:
                 nn.init.constant_(m.bias, 0)
-        # Zero-out output layers:
-        nn.init.constant_(self.postprocess_layer.adaLN_modulation[-1].weight, 0)
-        nn.init.constant_(self.postprocess_layer.adaLN_modulation[-1].bias, 0)
-        nn.init.constant_(self.postprocess_layer.linear.weight, 0)
-        nn.init.constant_(self.postprocess_layer.linear.bias, 0)
+        # # Zero-out output layers:
+        # nn.init.constant_(self.postprocess_layer.adaLN_modulation[-1].weight, 0)
+        # nn.init.constant_(self.postprocess_layer.adaLN_modulation[-1].bias, 0)
+        # nn.init.constant_(self.postprocess_layer.linear.weight, 0)
+        # nn.init.constant_(self.postprocess_layer.linear.bias, 0)
     def forward(self, x, c):
         x = self.postprocess_layer(x, c)
         return x
@@ -339,6 +389,10 @@ class SingleViewto3D(nn.Module):
             vision_model = torchvision_models.__dict__[args.arch](pretrained=True)
             self.encoder = torch.nn.Sequential(*(list(vision_model.children())[:-1]))
             self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225])
+
+        # self.vit = timm.create_model(
+            # "vit_base_patch16_224", pretrained=True, num_classes=0
+        # )
 
         # Input: b, num_points_samples, 3
         # Condition: b, 512
@@ -387,3 +441,4 @@ class SingleViewto3D(nn.Module):
 
 
         return pred.reshape(args.batch_size,args.num_samples)
+
