@@ -2,8 +2,9 @@ import argparse
 import time
 import torch
 # from model import SingleViewto3D
-from model_implicit import SingleViewto3D
-# from model_implicit_OccNet import SingleViewto3D
+# from model_implicit import SingleViewto3D
+# from model_implicit_PerceiverAdaLN import SingleViewto3D
+from model_implicit_OccNet import SingleViewto3D
 from r2n2_custom import R2N2
 from  pytorch3d.datasets.r2n2.utils import collate_batched_R2N2
 import dataset_location
@@ -36,10 +37,10 @@ def get_args_parser():
     parser.add_argument('--w_chamfer', default=1.0, type=float)
     parser.add_argument('--w_smooth', default=0.1, type=float)  
     parser.add_argument('--load_checkpoint', action='store_true')  
-    parser.add_argument('--device', default='cuda:2', type=str) 
+    parser.add_argument('--device', default='cuda:1', type=str) 
     parser.add_argument('--load_feat', action='store_true') 
     parser.add_argument("--num_samples", default=32*32*32, type=int)
-    parser.add_argument("--model_name", default="Perceiver_AdaLN", type=str)
+    parser.add_argument("--model_name", default="OccNet", type=str)
     return parser
 
 def preprocess(feed_dict, args):
@@ -101,10 +102,14 @@ def compute_sampling_metrics(pred_points, gt_points, thresholds, eps=1e-8):
 def evaluate(predictions, mesh_gt, thresholds, args):
     if args.type == "vox":
         voxels_src = predictions.reshape(args.batch_size,1,32,32,32)
+        # print('voxels_src',voxels_src.detach().cpu().numpy()[np.where(voxels_src.detach().cpu().numpy()>0.5)])
+        # print('voxels_src',len(voxels_src.detach().cpu().numpy()[np.where(voxels_src.detach().cpu().numpy()>0.5)]))
         H,W,D = voxels_src.shape[2:]
         vertices_src, faces_src = mcubes.marching_cubes(voxels_src.detach().cpu().squeeze().numpy(), isovalue=0.5)
-        if vertices_src.shape == torch.Size([0, 3]):
-            vertices_src, faces_src = mcubes.marching_cubes(voxels_src.detach().cpu().squeeze().numpy(), isovalue=0.2)
+        # if vertices_src.shape == torch.Size([0, 3]):
+            # print('here')
+            # print('vertices',vertices_src[np.where(vertices_src>-1000)])
+            # vertices_src, faces_src = mcubes.marching_cubes(voxels_src.detach().cpu().squeeze().numpy(), isovalue=0.2)
         vertices_src = torch.tensor(vertices_src).float()
         faces_src = torch.tensor(faces_src.astype(int))
         mesh_src = pytorch3d.structures.Meshes([vertices_src], [faces_src]) 
