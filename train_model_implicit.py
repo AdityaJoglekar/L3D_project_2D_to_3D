@@ -4,8 +4,9 @@ import time
 import dataset_location
 import losses
 import torch
-from model_implicit import SingleViewto3D
-# from model_implicit_OccNet import SingleViewto3D
+# from model_implicit import SingleViewto3D
+# from model_implicit_PerceiverAdaLN import SingleViewto3D
+from model_implicit_OccNet import SingleViewto3D
 from pytorch3d.datasets.r2n2.utils import collate_batched_R2N2
 from pytorch3d.ops import sample_points_from_meshes
 from r2n2_custom import R2N2
@@ -20,8 +21,9 @@ def get_args_parser():
     parser.add_argument("--arch", default="resnet18", type=str)
     parser.add_argument("--lr", default=1e-4, type=float)
     # parser.add_argument("--lr", default=1e-3, type=float)
-    parser.add_argument("--max_iter", default=10000, type=int)
+    parser.add_argument("--max_iter", default=100000, type=int)
     parser.add_argument("--batch_size", default=32, type=int)
+    # parser.add_argument("--batch_size", default=4, type=int)
     parser.add_argument("--num_workers", default=4, type=int)
     parser.add_argument(
         "--type", default="vox", choices=["vox", "point", "mesh","implicit"], type=str
@@ -32,10 +34,11 @@ def get_args_parser():
     # parser.add_argument("--save_freq", default=2000, type=int)
     parser.add_argument("--save_freq", default=100, type=int)
     parser.add_argument("--load_checkpoint", action="store_true")
-    parser.add_argument('--device', default='cuda:2', type=str) 
+    parser.add_argument('--device', default='cuda:0', type=str) 
     parser.add_argument('--load_feat', action='store_true') 
     parser.add_argument("--num_samples", default=4096, type=int)
-    parser.add_argument("--model_name", default="Perceiver_AdaLN", type=str)
+    # parser.add_argument("--num_samples", default=32768, type=int)
+    parser.add_argument("--model_name", default="OccNet", type=str)
     return parser
 
 
@@ -177,7 +180,7 @@ def train_model(args):
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)  # to use with ViTs
     start_iter = 0
     start_time = time.time()
-
+    print('args.load_checkpoint',args.load_checkpoint)
     if args.load_checkpoint:
         print('HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH')
         checkpoint = torch.load(f"checkpoint_{args.type}.pth")
