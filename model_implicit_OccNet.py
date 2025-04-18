@@ -56,9 +56,9 @@ class SingleViewto3D(nn.Module):
         # Input: b, num_points_samples, 3
         # Condition: b, 512
         # Output: b, num_point_samples
-        xl = np.linspace(-1,1,32)
-        yl = np.linspace(-1,1,32)  
-        zl = np.linspace(-1,1,32)
+        xl = np.linspace(-1,1,64)
+        yl = np.linspace(-1,1,64)  
+        zl = np.linspace(-1,1,64)
         xc, yc, zc = np.meshgrid(xl, yl, zl, indexing='ij')
         coords = np.concatenate((xc.reshape(-1,1),yc.reshape(-1,1),zc.reshape(-1,1)),axis=1)
         self.coords = torch.tensor(coords, dtype = torch.float32, device = self.device)  

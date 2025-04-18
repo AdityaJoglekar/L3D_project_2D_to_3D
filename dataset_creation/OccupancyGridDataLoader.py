@@ -3,14 +3,12 @@ import torch
 from torch.utils.data import Dataset
 import numpy as np
 from PIL import Image
-import io
-import cairosvg
 import torchvision.transforms as transforms
 
 class OccupancyGridDataset(Dataset):
-    def __init__(self, occupancy_dir, svg_dir, transform=None, grid_transform=None):
+    def __init__(self, occupancy_dir, image_dir, transform=None, grid_transform=None):
         self.occupancy_dir = occupancy_dir
-        self.svg_dir = svg_dir
+        self.image_dir = image_dir
         self.transform = transform
         self.grid_transform = grid_transform
 
@@ -23,13 +21,13 @@ class OccupancyGridDataset(Dataset):
             if f.endswith('.npy')
         }
 
-        # Go through SVGs and associate with occupancy
-        for svg_file in os.listdir(svg_dir):
-            if not svg_file.endswith('.svg'):
+        # Go through PNGs and associate with occupancy
+        for img_file in os.listdir(image_dir):
+            if not img_file.endswith('.png'):
                 continue
 
             # Parse base name and view direction
-            parts = os.path.splitext(svg_file)[0].rsplit('_', 1)
+            parts = os.path.splitext(img_file)[0].rsplit('_', 1)
             if len(parts) != 2:
                 continue
             base_name, view_type = parts
@@ -37,7 +35,7 @@ class OccupancyGridDataset(Dataset):
             if base_name in occ_map:
                 self.samples.append({
                     'occ_path': occ_map[base_name],
-                    'svg_path': os.path.join(svg_dir, svg_file),
+                    'img_path': os.path.join(image_dir, img_file),
                     'base_name': base_name,
                     'view_type': view_type
                 })
@@ -46,12 +44,6 @@ class OccupancyGridDataset(Dataset):
 
     def __len__(self):
         return len(self.samples)
-
-    def _load_svg_as_image(self, path):
-        """Convert SVG file to PIL Image."""
-        png_bytes = cairosvg.svg2png(url=path)
-        image = Image.open(io.BytesIO(png_bytes)).convert("RGB")
-        return image
 
     def __getitem__(self, idx):
         sample = self.samples[idx]
@@ -63,12 +55,14 @@ class OccupancyGridDataset(Dataset):
         else:
             grid = torch.tensor(grid, dtype=torch.float32)
 
-        # Load single view
-        view = self._load_svg_as_image(sample['svg_path'])
+        # Load image view
+        view = Image.open(sample['img_path']).convert("RGB")
         if self.transform:
             view = self.transform(view)
         else:
             view = transforms.ToTensor()(view)
+        
+        view = view.permute(1,2,0)
 
         return {
             'occupancy': grid,
@@ -88,8 +82,8 @@ class OccupancyGridDataset(Dataset):
 # ])
 
 # dataset = OccupancyGridDataset(
-#     occupancy_dir='/home/mmpug/Desktop/CADSTUFF/L3DPROJ/L3D_project_2D_to_3D/dataset/filtered/occupancy',
-#     svg_dir='/home/mmpug/Desktop/CADSTUFF/L3DPROJ/L3D_project_2D_to_3D/dataset/filtered/svgs',
+#     occupancy_dir='/home/mmpug/Desktop/CADSTUFF/L3DPROJ/L3D_project_2D_to_3D/dataset/fusion360_dataset/occupancy',
+#     image_dir='/home/mmpug/Desktop/CADSTUFF/L3DPROJ/L3D_project_2D_to_3D/dataset/fusion360_dataset/pngs',
 #     transform=transforms.Compose([
 #         transforms.Resize((128, 128)),
 #         transforms.ToTensor()
