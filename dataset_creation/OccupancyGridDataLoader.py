@@ -1,4 +1,5 @@
 import os
+import json
 import torch
 from torch.utils.data import Dataset
 import numpy as np
@@ -6,7 +7,7 @@ from PIL import Image
 import torchvision.transforms as transforms
 
 class OccupancyGridDataset(Dataset):
-    def __init__(self, occupancy_dir, image_dir, transform=None, grid_transform=None):
+    def __init__(self, occupancy_dir, image_dir, split_path, split_name='train', transform=None, grid_transform=None):
         self.occupancy_dir = occupancy_dir
         self.image_dir = image_dir
         self.transform = transform
@@ -14,11 +15,16 @@ class OccupancyGridDataset(Dataset):
 
         self.samples = []
 
-        # Create a mapping from occupancy base name to full path
+        # Load split.json and extract relevant filenames
+        with open(split_path, 'r') as f:
+            split_data = json.load(f)
+        allowed_filenames = set(split_data[split_name])  # Just base names, no extension
+
+        # Map occupancy filenames (base name -> path)
         occ_map = {
             os.path.splitext(f)[0]: os.path.join(occupancy_dir, f)
             for f in os.listdir(occupancy_dir)
-            if f.endswith('.npy')
+            if f.endswith('.npy') and os.path.splitext(f)[0] in allowed_filenames
         }
 
         # Go through PNGs and associate with occupancy
@@ -26,7 +32,6 @@ class OccupancyGridDataset(Dataset):
             if not img_file.endswith('.png'):
                 continue
 
-            # Parse base name and view direction
             parts = os.path.splitext(img_file)[0].rsplit('_', 1)
             if len(parts) != 2:
                 continue
@@ -61,8 +66,8 @@ class OccupancyGridDataset(Dataset):
             view = self.transform(view)
         else:
             view = transforms.ToTensor()(view)
-        
-        view = view.permute(1,2,0)
+
+        view = view.permute(1, 2, 0)  # HWC format if needed
 
         return {
             'occupancy': grid,
@@ -70,6 +75,7 @@ class OccupancyGridDataset(Dataset):
             'view_type': sample['view_type'],
             'id': sample['base_name']
         }
+
 
 ## ----------- Example Use ----------- ##
 
@@ -81,15 +87,17 @@ class OccupancyGridDataset(Dataset):
 #     transforms.ToTensor()
 # ])
 
+
 # dataset = OccupancyGridDataset(
 #     occupancy_dir='/home/mmpug/Desktop/CADSTUFF/L3DPROJ/L3D_project_2D_to_3D/dataset/fusion360_dataset/occupancy',
 #     image_dir='/home/mmpug/Desktop/CADSTUFF/L3DPROJ/L3D_project_2D_to_3D/dataset/fusion360_dataset/pngs',
+#     split_path='/home/mmpug/Desktop/CADSTUFF/L3DPROJ/L3D_project_2D_to_3D/dataset/fusion360_dataset/splits_f360.json',
+#     split_name='test',
 #     transform=transforms.Compose([
 #         transforms.Resize((128, 128)),
 #         transforms.ToTensor()
 #     ])
 # )
-
 
 # dataloader = DataLoader(dataset, batch_size=2)
 # for batch in dataloader:

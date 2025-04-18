@@ -177,7 +177,9 @@ def train_model(args):
         transform=transforms.Compose([
             transforms.Resize((128, 128)),
             transforms.ToTensor()
-        ])
+        ]),
+        split_path = dataset_location.SPLITS_PATH,
+        split_name='train'
     )
 
     loader = torch.utils.data.DataLoader(

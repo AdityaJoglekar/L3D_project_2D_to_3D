@@ -22,7 +22,7 @@ else:
     SPLITS_PATH = f"{root_location}/{dataset_name}/split_03001627.json"  # split file contains data entry for 03001627 class
 
 if use_f360_dataset:
-    SPLITS_PATH = f"{root_location}/{dataset_name}/split_f360.json"
+    SPLITS_PATH = f"{root_location}/{dataset_name}/splits_f360.json"
 
 ## ---------- TEST IF CORRECT VARIABLES ARE BEING LOADED ----------------- ## 
 # print(use_f360_dataset)
