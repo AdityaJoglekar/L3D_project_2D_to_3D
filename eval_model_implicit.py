@@ -2,9 +2,9 @@ import argparse
 import time
 import torch
 # from model import SingleViewto3D
-# from model_implicit import SingleViewto3D
+from model_implicit import SingleViewto3D
 # from model_implicit_PerceiverAdaLN import SingleViewto3D
-from model_implicit_OccNet import SingleViewto3D
+# from model_implicit_OccNet import SingleViewto3D
 from r2n2_custom import R2N2
 from  pytorch3d.datasets.r2n2.utils import collate_batched_R2N2
 import dataset_location
@@ -47,9 +47,9 @@ def get_args_parser():
     parser.add_argument('--w_chamfer', default=1.0, type=float)
     parser.add_argument('--w_smooth', default=0.1, type=float)  
     parser.add_argument('--load_checkpoint', action='store_true')  
-    parser.add_argument('--device', default='cuda:1', type=str) 
+    parser.add_argument('--device', default='cuda:0', type=str) 
     parser.add_argument('--load_feat', action='store_true') 
-    parser.add_argument("--num_samples", default=32*32*32, type=int)
+    parser.add_argument("--num_samples", default=64*64*64, type=int)
     parser.add_argument("--model_name", default="OccNet", type=str)
     return parser
 
@@ -58,11 +58,15 @@ def preprocess(feed_dict, args):
         feed_dict[k] = feed_dict[k].to(args.device)
 
     images = feed_dict['images'].squeeze(1)
-    mesh = feed_dict['mesh']
-    if args.load_feat:
-        images = torch.stack(feed_dict['feats']).to(args.device)
+    voxels_gt = feed_dict['voxels'].reshape(args.batch_size,1,64,64,64)
+    H,W,D = voxels_gt.shape[2:]
+    vertices_src, faces_src = mcubes.marching_cubes(voxels_gt.detach().cpu().squeeze().numpy(), isovalue=0.5)
+    vertices_src = torch.tensor(vertices_src).float()
+    faces_src = torch.tensor(faces_src.astype(int))
+    mesh_gt = pytorch3d.structures.Meshes([vertices_src], [faces_src]) 
+    
+    return images.to(args.device), mesh_gt
 
-    return images, mesh
 
 def save_plot(thresholds, avg_f1_score, args):
     fig = plt.figure()
@@ -111,7 +115,7 @@ def compute_sampling_metrics(pred_points, gt_points, thresholds, eps=1e-8):
 
 def evaluate(predictions, mesh_gt, thresholds, args):
     if args.type == "vox":
-        voxels_src = predictions.reshape(args.batch_size,1,32,32,32)
+        voxels_src = predictions.reshape(args.batch_size,1,64,64,64)
         # print('voxels_src',voxels_src.detach().cpu().numpy()[np.where(voxels_src.detach().cpu().numpy()>0.5)])
         # print('voxels_src',len(voxels_src.detach().cpu().numpy()[np.where(voxels_src.detach().cpu().numpy()>0.5)]))
         H,W,D = voxels_src.shape[2:]
@@ -133,10 +137,10 @@ def evaluate(predictions, mesh_gt, thresholds, args):
         pred_points = T_transform.transform_points(pred_points)
         # re-center the predicted points
         pred_points = pred_points - pred_points.mean(1, keepdim=True)
-    elif args.type == "point":
-        pred_points = predictions.cpu()
-    elif args.type == "mesh":
-        pred_points = sample_points_from_meshes(predictions, args.n_points).cpu()
+    # elif args.type == "point":
+    #     pred_points = predictions.cpu()
+    # elif args.type == "mesh":
+    #     pred_points = sample_points_from_meshes(predictions, args.n_points).cpu()
 
     gt_points = sample_points_from_meshes(mesh_gt, args.n_points)
     if args.type == "vox":
@@ -213,8 +217,9 @@ def evaluate_model(args):
 
         read_time = time.time() - read_start_time
 
-        predictions = model(images_gt, args, indices = torch.arange(0,32*32*32))
-        # print('pred',torch.max(predictions))
+        predictions = model(images_gt, args, indices = torch.arange(0,64*64*64))
+        print(predictions.shape)
+        print('pred',torch.max(predictions))
 
         metrics = evaluate(predictions, mesh_gt, thresholds, args)
 
@@ -228,7 +233,7 @@ def evaluate_model(args):
             cameras = pytorch3d.renderer.FoVPerspectiveCameras(R=R, T=T, fov=60, device=args.device)
             pred = predictions
             ###########  Problem 3.1  ############
-            voxels_src = pred.reshape(args.batch_size,32,32,32)
+            voxels_src = pred.reshape(args.batch_size,64,64,64)
             print('voxels_src: ',voxels_src.shape)  
             try:      
                 pred = pytorch3d.ops.cubify(voxels_src,thresh = 0.5)
