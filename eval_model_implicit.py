@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 from pytorch3d.transforms import Rotate, axis_angle_to_matrix
 import math
 import numpy as np
-
+from dataset_creation.OccupancyGridDataLoader import OccupancyGridDataset
 import pytorch3d
 from utils import get_device, get_mesh_renderer, get_points_renderer
 from PIL import Image
@@ -25,6 +25,16 @@ import imageio
 import numpy as np
 from matplotlib import cm, colors
 from matplotlib.colors import LightSource
+import torchvision.transforms as transforms
+
+def custom_collate_fn(batch):
+    occupancy = torch.stack([item['occupancy'] for item in batch])
+    view = torch.stack([item['view'] for item in batch])
+    return {
+        'voxels': occupancy,  # renaming to match your training script
+        'images': view,
+    }
+
 
 def get_args_parser():
     parser = argparse.ArgumentParser('Singleto3D', add_help=False)
@@ -137,15 +147,37 @@ def evaluate(predictions, mesh_gt, thresholds, args):
 
 
 def evaluate_model(args):
-    r2n2_dataset = R2N2("test", dataset_location.SHAPENET_PATH, dataset_location.R2N2_PATH, dataset_location.SPLITS_PATH, return_voxels=True, return_feats=args.load_feat)
+    # r2n2_dataset = R2N2("test", dataset_location.SHAPENET_PATH, dataset_location.R2N2_PATH, dataset_location.SPLITS_PATH, return_voxels=True, return_feats=args.load_feat)
+
+    # loader = torch.utils.data.DataLoader(
+    #     r2n2_dataset,
+    #     batch_size=args.batch_size,
+    #     num_workers=args.num_workers,
+    #     collate_fn=collate_batched_R2N2,
+    #     pin_memory=True,
+    #     drop_last=True)
+    # eval_loader = iter(loader)
+
+    f360_dataset = OccupancyGridDataset(
+        occupancy_dir=dataset_location.FUSION_360_OCCUPANCY_PATH,
+        image_dir=dataset_location.FUSION_360_VIEWS_PATH,
+        transform=transforms.Compose([
+            transforms.Resize((128, 128)),
+            transforms.ToTensor()
+        ]),
+        split_path = dataset_location.SPLITS_PATH,
+        split_name='test'
+    )
 
     loader = torch.utils.data.DataLoader(
-        r2n2_dataset,
+        f360_dataset,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
-        collate_fn=collate_batched_R2N2,
         pin_memory=True,
-        drop_last=True)
+        drop_last=True,
+        shuffle=True,
+        collate_fn=custom_collate_fn
+    )
     eval_loader = iter(loader)
 
     model = SingleViewto3D(args)
