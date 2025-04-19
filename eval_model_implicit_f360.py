@@ -4,7 +4,8 @@ import torch
 # from model import SingleViewto3D
 # from model_implicit import SingleViewto3D
 # from model_implicit_PerceiverAdaLN import SingleViewto3D
-from model_implicit_OccNet import SingleViewto3D
+# from model_implicit_OccNet import SingleViewto3D
+from model_implicit_OccNet_eval import SingleViewto3D
 from r2n2_custom import R2N2
 from  pytorch3d.datasets.r2n2.utils import collate_batched_R2N2
 import dataset_location
