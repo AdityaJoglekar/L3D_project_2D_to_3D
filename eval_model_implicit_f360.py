@@ -2,7 +2,7 @@ import argparse
 import time
 import torch
 # from model import SingleViewto3D
-# from model_implicit import SingleViewto3D
+# from model_implicit_eval import SingleViewto3D
 # from model_implicit_PerceiverAdaLN import SingleViewto3D
 # from model_implicit_OccNet import SingleViewto3D
 from model_implicit_OccNet_eval import SingleViewto3D
