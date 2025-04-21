@@ -5,7 +5,8 @@ import torch
 # from model_implicit_eval import SingleViewto3D
 # from model_implicit_PerceiverAdaLN import SingleViewto3D
 # from model_implicit_OccNet import SingleViewto3D
-from model_implicit_OccNet_eval import SingleViewto3D
+# from latest_model_implicit_Occnet_eval import SingleViewto3D
+from latest_model_implicit_eval import SingleViewto3D
 from r2n2_custom import R2N2
 from  pytorch3d.datasets.r2n2.utils import collate_batched_R2N2
 import dataset_location
@@ -40,7 +41,7 @@ import torchvision.transforms as transforms
 def get_args_parser():
     parser = argparse.ArgumentParser('Singleto3D', add_help=False)
     parser.add_argument('--arch', default='resnet18', type=str)
-    parser.add_argument('--vis_freq', default=200, type=int)
+    parser.add_argument('--vis_freq', default=20, type=int)
     parser.add_argument('--batch_size', default=1, type=int)
     parser.add_argument('--num_workers', default=0, type=int)
     parser.add_argument('--type', default='vox', choices=['vox', 'point', 'mesh'], type=str)
@@ -48,11 +49,11 @@ def get_args_parser():
     parser.add_argument('--w_chamfer', default=1.0, type=float)
     parser.add_argument('--w_smooth', default=0.1, type=float)  
     parser.add_argument('--load_checkpoint', action='store_true')  
-    parser.add_argument('--device', default='cuda:0', type=str) 
+    parser.add_argument('--device', default='cuda:1', type=str) 
     parser.add_argument('--load_feat', action='store_true') 
     parser.add_argument("--num_samples", default=32*32*32, type=int)
-    parser.add_argument("--model_name", default="Occnet", type=str)
-    # parser.add_argument("--model_name", default="PerceiverAdaLN", type=str)
+    # parser.add_argument("--model_name", default="Occnet", type=str)
+    parser.add_argument("--model_name", default="PerceiverAdaLN", type=str)
     return parser
 
 def preprocess(feed_dict, args):
@@ -140,8 +141,6 @@ def compute_sampling_metrics(pred_points, gt_points, thresholds, eps=1e-8):
         precision = 100.0 * (pred_to_gt_dists < t).float().mean(dim=1)
         recall = 100.0 * (gt_to_pred_dists < t).float().mean(dim=1)
         f1 = (2.0 * precision * recall) / (precision + recall + eps)
-        metrics["Precision@%f" % t] = precision
-        metrics["Recall@%f" % t] = recall
         metrics["F1@%f" % t] = f1
 
     # Move all metrics to CPU
@@ -185,7 +184,39 @@ def evaluate_iou(metrics ,predictions, voxels_gt, args):
 
 def evaluate(predictions, mesh_gt, thresholds, args, voxgt):
 
-    metrics = {}
+    voxels_src = predictions.reshape(args.batch_size,1,32,32,32)
+    H,W,D = voxels_src.shape[2:]
+    # print('voxels_src',len(voxels_src.detach().cpu().numpy()[np.where(voxels_src.detach().cpu().numpy()>0.5)]))
+    exc = 0
+    try:
+        vertices_src, faces_src = mcubes.marching_cubes(voxels_src.detach().cpu().squeeze().numpy(), isovalue=0.5)
+        # print('vertices_src',vertices_src)
+        vertices_src = torch.tensor(vertices_src).float()
+        faces_src = torch.tensor(faces_src.astype(int))
+        mesh_src = pytorch3d.structures.Meshes([vertices_src], [faces_src]) 
+        pred_points = sample_points_from_meshes(mesh_src, args.n_points)
+    except:
+        # vertices_src, faces_src = mcubes.marching_cubes(voxels_src.detach().cpu().squeeze().numpy(), isovalue=0.2)
+        # vertices_src = torch.tensor(vertices_src).float()
+        # faces_src = torch.tensor(faces_src.astype(int))
+        # mesh_src = pytorch3d.structures.Meshes([vertices_src], [faces_src]) 
+        # pred_points = sample_points_from_meshes(mesh_src, args.n_points)   
+        exc = 1
+        
+    # re-center the predicted points
+    try:
+        gt_points = sample_points_from_meshes(mesh_gt, args.n_points)
+    except:
+        exc = 1
+    if exc == 1:
+        metrics = {}
+        metrics["F1@%f" % 0.05] = 0.0
+    else:
+        gt_points = (gt_points - gt_points.mean(1, keepdim=True))/gt_points.max()
+        pred_points = (pred_points - pred_points.mean(1, keepdim=True))/pred_points.max()
+        # print('pred_points',pred_points)
+        # print('gt_points',gt_points)
+        metrics = compute_sampling_metrics(pred_points, gt_points, thresholds)
     metrics = evaluate_iou(metrics,predictions = predictions, voxels_gt=voxgt, args=args)
     return metrics
 
@@ -220,7 +251,7 @@ def evaluate_model(args):
         num_workers=args.num_workers,
         pin_memory=True,
         drop_last=True,
-        shuffle=True,
+        shuffle=False,
         collate_fn=custom_collate_fn
     )
     eval_loader = iter(loader)
@@ -232,17 +263,15 @@ def evaluate_model(args):
     start_iter = 0
     start_time = time.time()
 
-    thresholds = [0.01, 0.02, 0.03, 0.04, 0.05]
+    thresholds = [0.05]
 
-    # avg_f1_score_05 = []
-    # avg_f1_score = []
-    # avg_p_score = []
-    # avg_r_score = []
+    avg_f1_score_05 = []
+    avg_f1_score = []
     avg_iou = []
 
     if args.load_checkpoint:
         # checkpoint = torch.load(f'checkpoint_{args.type}.pth')
-        checkpoint = torch.load(f'/home/vhsingh/latest/checkpoint_implicit_{args.model_name}_99000.pth')
+        checkpoint = torch.load(f'latest/checkpoint_implicit_{args.model_name}_99000.pth')
         model.load_state_dict(checkpoint['model_state_dict'])
         print(f"Succesfully loaded iter {start_iter}")
     
@@ -272,33 +301,36 @@ def evaluate_model(args):
         #     #  rend = 
         #     plt.imsave(f'vis/{step}_{args.type}.png', rend)
         if (step % args.vis_freq) == 0:
+            plt.imsave(f'visf/{step}_{args.type}_image_gt_1.png', images_gt.detach().cpu().numpy()[0][0]) 
+            plt.imsave(f'visf/{step}_{args.type}_image_gt_2.png', images_gt.detach().cpu().numpy()[1][0])
+            plt.imsave(f'visf/{step}_{args.type}_image_gt_3.png', images_gt.detach().cpu().numpy()[2][0])
+            try:  
 
-            try:   
-                R,T = pytorch3d.renderer.cameras.look_at_view_transform(dist=200, elev=30, azim=120)
+                R,T = pytorch3d.renderer.cameras.look_at_view_transform(dist=3, elev=30, azim=120)
                 cameras = pytorch3d.renderer.FoVPerspectiveCameras(R=R, T=T, fov=60, device=args.device)
-
+                meshgt = pytorch3d.ops.cubify(voxgt.reshape(args.batch_size,32,32,32),thresh = 0.5)
                 color=[0.7, 0.7, 1]   
                 lights = pytorch3d.renderer.PointLights(location=[[0, 0.0, -2.0]], device=args.device)
-                textures = (torch.ones_like(mesh_gt.verts_padded()).to(args.device))*(torch.tensor(color).to(args.device))
-                mesh_gt.textures = pytorch3d.renderer.TexturesVertex(textures)
+                textures = (torch.ones_like(meshgt.verts_padded()).to(args.device))*(torch.tensor(color).to(args.device))
+                meshgt.textures = pytorch3d.renderer.TexturesVertex(textures)
                 renderer = get_mesh_renderer(image_size=256, device=args.device)
-                rend = renderer(mesh_gt.to(args.device), cameras=cameras, lights=lights)
+                rend = renderer(meshgt.to(args.device), cameras=cameras, lights=lights)
                 rend = rend[0, ..., :3].detach().cpu().numpy().clip(0, 1)
-                plt.imsave(f'vis/{step}_meshgt.png', rend)   
+                plt.imsave(f'visf/{step}_meshgt.png', rend)   
             
                 pred = predictions
                 voxels_src = pred.reshape(args.batch_size,32,32,32)
                 print('voxels_src: ',voxels_src.shape) 
 
-                R,T = pytorch3d.renderer.cameras.look_at_view_transform(dist=200, elev=30, azim=120)
+                R,T = pytorch3d.renderer.cameras.look_at_view_transform(dist=3, elev=30, azim=120)
                 cameras = pytorch3d.renderer.FoVPerspectiveCameras(R=R, T=T, fov=60, device=args.device)   
-                # pred = pytorch3d.ops.cubify(voxels_src,thresh = 0.5)
-                voxels_src = predictions.reshape(args.batch_size,1,32,32,32)
-                H,W,D = voxels_src.shape[2:]
-                vertices_src, faces_src = mcubes.marching_cubes(voxels_src.detach().cpu().squeeze().numpy(), isovalue=0.5)
-                vertices_src = torch.tensor(vertices_src).float()
-                faces_src = torch.tensor(faces_src.astype(int))
-                pred = pytorch3d.structures.Meshes([vertices_src], [faces_src]) 
+                pred = pytorch3d.ops.cubify(voxels_src,thresh = 0.5)
+                # voxels_src = predictions.reshape(args.batch_size,1,32,32,32)
+                # H,W,D = voxels_src.shape[2:]
+                # vertices_src, faces_src = mcubes.marching_cubes(voxels_src.detach().cpu().squeeze().numpy(), isovalue=0.5)
+                # vertices_src = torch.tensor(vertices_src).float()
+                # faces_src = torch.tensor(faces_src.astype(int))
+                # pred = pytorch3d.structures.Meshes([vertices_src], [faces_src]) 
                 color=[0.7, 0.7, 1]   
                 lights = pytorch3d.renderer.PointLights(location=[[0, 0.0, -2.0]], device=args.device)
                 textures = (torch.ones_like(pred.verts_padded()).to(args.device))*(torch.tensor(color).to(args.device))
@@ -306,7 +338,7 @@ def evaluate_model(args):
                 renderer = get_mesh_renderer(image_size=256, device=args.device)
                 rend = renderer(pred.to(args.device), cameras=cameras, lights=lights)
                 rend = rend[0, ..., :3].detach().cpu().numpy().clip(0, 1)
-                plt.imsave(f'vis/{step}_implicit_{args.model_name}.png', rend)
+                plt.imsave(f'visf/{step}_implicit_{args.model_name}.png', rend)
             except:
                 # R,T = pytorch3d.renderer.cameras.look_at_view_transform(dist=3, elev=30, azim=120)
                 # cameras = pytorch3d.renderer.FoVPerspectiveCameras(R=R, T=T, fov=60, device=args.device) 
@@ -319,6 +351,7 @@ def evaluate_model(args):
                 # rend = renderer(pred.to(args.device), cameras=cameras, lights=lights)
                 # rend = rend[0, ..., :3].detach().cpu().numpy().clip(0, 1)
                 # plt.imsave(f'vis/{step}_implicit_{args.model_name}.png', rend)
+                print(f'failed image gen at {step}')
                 pass
 
 
@@ -328,22 +361,19 @@ def evaluate_model(args):
         total_time = time.time() - start_time
         iter_time = time.time() - iter_start_time
 
-        # f1_05 = metrics['F1@0.050000']
-        # avg_f1_score_05.append(f1_05)
-        # avg_p_score.append(torch.tensor([metrics["Precision@%f" % t] for t in thresholds]))
-        # avg_r_score.append(torch.tensor([metrics["Recall@%f" % t] for t in thresholds]))
-        # avg_f1_score.append(torch.tensor([metrics["F1@%f" % t] for t in thresholds]))
+        f1_05 = metrics['F1@0.050000']
+        avg_f1_score_05.append(f1_05)
 
         iou = metrics["IoU@0.5"]
         avg_iou.append(torch.tensor(iou))
 
-        print("[%4d/%4d]; ttime: %.0f (%.2f, %.2f); IOU: %.3f, Avg IOU: %.3f" % (step, max_iter, total_time, read_time, iter_time, iou, torch.tensor(avg_iou).mean()))
-        # print("[%4d/%4d]; ttime: %.0f (%.2f, %.2f); F1@0.05: %.3f; Avg F1@0.05: %.3f, IOU: %.3f, Avg IOU: %.3f" % (step, max_iter, total_time, read_time, iter_time, f1_05, torch.tensor(avg_f1_score_05).mean(), iou, torch.tensor(avg_iou).mean()))
+        # print("[%4d/%4d]; ttime: %.0f (%.2f, %.2f); IOU: %.3f, Avg IOU: %.3f" % (step, max_iter, total_time, read_time, iter_time, iou, torch.tensor(avg_iou).mean()))
+        print("[%4d/%4d]; ttime: %.0f (%.2f, %.2f); F1@0.05: %.3f; Avg F1@0.05: %.3f, IOU: %.3f, Avg IOU: %.3f" % (step, max_iter, total_time, read_time, iter_time, f1_05, torch.tensor(avg_f1_score_05).mean(), iou, torch.tensor(avg_iou).mean()))
     
 
-    avg_f1_score = torch.stack(avg_f1_score).mean(0)
+    # avg_f1_score = torch.stack(avg_f1_score).mean(0)
 
-    save_plot(thresholds, avg_f1_score,  args)
+    # save_plot(thresholds, avg_f1_score,  args)
     print('Done!')
 
 if __name__ == '__main__':
