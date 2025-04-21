@@ -1,10 +1,10 @@
 import os
 import json
+from PIL import Image
+import numpy as np
 import torch
 from torch.utils.data import Dataset
-import numpy as np
-from PIL import Image
-import torchvision.transforms as transforms
+from torchvision import transforms
 
 class OccupancyGridDataset(Dataset):
     def __init__(self, occupancy_dir, image_dir, split_path, split_name='train', transform=None, grid_transform=None):
@@ -12,40 +12,54 @@ class OccupancyGridDataset(Dataset):
         self.image_dir = image_dir
         self.transform = transform
         self.grid_transform = grid_transform
-
         self.samples = []
 
-        # Load split.json and extract relevant filenames
-        with open(split_path, 'r') as f:
-            split_data = json.load(f)
-        allowed_filenames = set(split_data[split_name])  # Just base names, no extension
+        print("Loading split file...")
+        try:
+            with open(split_path, 'r') as f:
+                split_data = json.load(f)
+            allowed_base_names = set(split_data[split_name])
+            print(f"Number of allowed base names in '{split_name}': {len(allowed_base_names)}")
+        except FileNotFoundError:
+            print(f"Error: Split file not found at {split_path}")
+            return
+        except json.JSONDecodeError:
+            print(f"Error: Could not decode JSON from {split_path}")
+            return
 
-        # Map occupancy filenames (base name -> path)
+        print("Mapping occupancy files...")
         occ_map = {
             os.path.splitext(f)[0]: os.path.join(occupancy_dir, f)
             for f in os.listdir(occupancy_dir)
-            if f.endswith('.npy') and os.path.splitext(f)[0] in allowed_filenames
+            if f.endswith('.npy') and os.path.splitext(f)[0] in allowed_base_names
         }
+        print(f"Number of matching occupancy files: {len(occ_map)}")
 
-        # Go through PNGs and associate with occupancy
+        print("Grouping image files...")
+        image_groups = {}
         for img_file in os.listdir(image_dir):
             if not img_file.endswith('.png'):
                 continue
-
             parts = os.path.splitext(img_file)[0].rsplit('_', 1)
-            if len(parts) != 2:
-                continue
-            base_name, view_type = parts
+            if len(parts) == 2:
+                base_name, view_type = parts
+                if base_name in allowed_base_names:
+                    if base_name not in image_groups:
+                        image_groups[base_name] = {}
+                    image_groups[base_name][view_type] = os.path.join(image_dir, img_file)
+        print(f"Number of base names with associated images: {len(image_groups)}")
 
-            if base_name in occ_map:
+        print("Creating samples...")
+        for base_name, occ_path in occ_map.items():
+            if base_name in image_groups and 'front' in image_groups[base_name] and 'right' in image_groups[base_name] and 'top' in image_groups[base_name]:
                 self.samples.append({
-                    'occ_path': occ_map[base_name],
-                    'img_path': os.path.join(image_dir, img_file),
-                    'base_name': base_name,
-                    'view_type': view_type
+                    'occ_path': occ_path,
+                    'img_paths': image_groups[base_name],
+                    'base_name': base_name
                 })
+        print(f"Number of samples created: {len(self.samples)}")
 
-        self.samples.sort(key=lambda x: (x['base_name'], x['view_type']))
+        self.samples.sort(key=lambda x: x['base_name'])
 
     def __len__(self):
         return len(self.samples)
@@ -60,24 +74,38 @@ class OccupancyGridDataset(Dataset):
         else:
             grid = torch.tensor(grid, dtype=torch.float32)
 
-        # Load image view
-        view = Image.open(sample['img_path']).convert("RGB")
-        if self.transform:
-            view = self.transform(view)
-        else:
-            view = transforms.ToTensor()(view)
-
-        view = view.permute(1, 2, 0)  # HWC format if needed
+        views = {}
+        for view_type, img_path in sample['img_paths'].items():
+            print(view_type)
+            # Load image view
+            view = Image.open(img_path).convert("RGB")
+            if self.transform:
+                view = self.transform(view)
+            else:
+                view = transforms.ToTensor()(view)
+            views[view_type] = view.permute(1, 2, 0)  # HWC format
 
         return {
             'occupancy': grid,
-            'view': view,
-            'view_type': sample['view_type'],
-            'id': sample['base_name']
+            'front_view': views.get('front'),
+            'side_view': views.get('right'),
+            'top_view': views.get('top')
         }
 
-
+def custom_collate_fn(batch):
+    occupancy = torch.stack([item['occupancy'] for item in batch])
+    front_view = torch.stack([item['front_view'] for item in batch])
+    side_view = torch.stack([item['side_view'] for item in batch])
+    top_view = torch.stack([item['top_view'] for item in batch])
+    return {
+        'occupancy': occupancy,  # renaming to match your training script
+        'front_images': front_view,
+        'side_images': side_view,  
+        'top_images': top_view,    
+    }
 ## ----------- Example Use ----------- ##
+
+
 
 # from torch.utils.data import DataLoader
 # import torchvision.transforms as transforms
@@ -87,72 +115,23 @@ class OccupancyGridDataset(Dataset):
 #     transforms.ToTensor()
 # ])
 
-
+# print("here")
 # dataset = OccupancyGridDataset(
 #     occupancy_dir='/home/mmpug/Desktop/CADSTUFF/L3DPROJ/L3D_project_2D_to_3D/dataset/fusion360_dataset/occupancy',
 #     image_dir='/home/mmpug/Desktop/CADSTUFF/L3DPROJ/L3D_project_2D_to_3D/dataset/fusion360_dataset/pngs',
 #     split_path='/home/mmpug/Desktop/CADSTUFF/L3DPROJ/L3D_project_2D_to_3D/dataset/fusion360_dataset/splits_f360.json',
-#     split_name='test',
+#     split_name='train',
 #     transform=transforms.Compose([
 #         transforms.Resize((128, 128)),
 #         transforms.ToTensor()
 #     ])
 # )
 
-# dataloader = DataLoader(dataset, batch_size=2)
+# dataloader = DataLoader(dataset, batch_size=2, collate_fn=custom_collate_fn)
 # for batch in dataloader:
-#     print("BATCH ID : ", batch['id'])                         # list of sample names
-#     print("OCCUPANCY : ", batch['occupancy'].shape)            # e.g. [B, D, H, W]
-#     print("VIEWS SHAPE : ", batch['view'].shape)                # e.g. [B, 3, 128, 128]
-#     print("VIEW TYPE : ", batch['view_type'])
-
-## ----------- END Example Use ----------- ##
-
-## ----------- Filtered dataset creation ----------- ##
-# import os
-# import shutil
-
-# # Original paths
-# svg_dir = '/home/mmpug/Desktop/CADSTUFF/L3DPROJ/L3D_project_2D_to_3D/dataset/svg_outputs'
-# occ_dir = '/home/mmpug/Desktop/CADSTUFF/L3DPROJ/L3D_project_2D_to_3D/dataset/occupancy_net/reconstruction_occgrid'
-
-# # Destination paths
-# filtered_occ_dir = '/home/mmpug/Desktop/CADSTUFF/L3DPROJ/L3D_project_2D_to_3D/dataset/filtered/occupancy'
-# filtered_svg_dir = '/home/mmpug/Desktop/CADSTUFF/L3DPROJ/L3D_project_2D_to_3D/dataset/filtered/svgs'
-
-# # Create destination folders if they don't exist
-# os.makedirs(filtered_occ_dir, exist_ok=True)
-# os.makedirs(filtered_svg_dir, exist_ok=True)
-
-# # List files
-# svg_files = set(os.listdir(svg_dir))
-# occupancy_files = [f for f in os.listdir(occ_dir) if f.endswith('.npy')]
-
-# required_views = ['front', 'right', 'top']
-
-# count = 0
-
-# for occ_file in occupancy_files:
-#     base_name = os.path.splitext(occ_file)[0]
-
-#     # Check if all 3 svg views exist
-#     all_views_exist = all(f"{base_name}_{view}.svg" in svg_files for view in required_views)
-
-#     if all_views_exist:
-#         # Copy occupancy file
-#         src_occ_path = os.path.join(occ_dir, occ_file)
-#         dst_occ_path = os.path.join(filtered_occ_dir, occ_file)
-#         shutil.copy(src_occ_path, dst_occ_path)
-
-#         # Copy svg views
-#         for view in required_views:
-#             svg_name = f"{base_name}_{view}.svg"
-#             src_svg_path = os.path.join(svg_dir, svg_name)
-#             dst_svg_path = os.path.join(filtered_svg_dir, svg_name)
-#             shutil.copy(src_svg_path, dst_svg_path)
-
-#         count += 1
-
-# print(f" Copied {count} valid samples with all 3 views.")
-
-## ----------- END Filtered dataset creation ----------- ##
+#     print("here2")                   # list of sample names
+#     print("OCCUPANCY SHAPE : ", batch['occupancy'].shape)            # e.g. [B, D, H, W]
+#     print("FRONT VIEW SHAPE : ", batch['front_images'].shape if batch['front_images'] is not None else None) # e.g. [B, H, W, 3]
+#     print("SIDE VIEW SHAPE : ", batch['side_images'].shape if batch['side_images'] is not None else None)   # e.g. [B, H, W, 3]
+#     print("TOP VIEW SHAPE : ", batch['top_images'].shape if batch['top_images'] is not None else None)     # e.g. [B, H, W, 3]
+#     break 

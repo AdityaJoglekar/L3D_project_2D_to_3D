@@ -10,18 +10,18 @@ from model_implicit import SingleViewto3D
 from pytorch3d.datasets.r2n2.utils import collate_batched_R2N2
 from pytorch3d.ops import sample_points_from_meshes
 # from r2n2_custom import R2N2
-from dataset_creation.OccupancyGridDataLoader import OccupancyGridDataset
+from dataset_creation.OccupancyGridDataLoader import OccupancyGridDataset, custom_collate_fn
 import torchvision.transforms as transforms
 import numpy as np
 import matplotlib.pyplot as plt
 
-def custom_collate_fn(batch):
-    occupancy = torch.stack([item['occupancy'] for item in batch])
-    view = torch.stack([item['view'] for item in batch])
-    return {
-        'voxels': occupancy,  # renaming to match your training script
-        'images': view,
-    }
+# def custom_collate_fn(batch):
+#     occupancy = torch.stack([item['occupancy'] for item in batch])
+#     view = torch.stack([item['view'] for item in batch])
+#     return {
+#         'voxels': occupancy,  # renaming to match your training script
+#         'images': view,
+#     }
 
 
 def get_args_parser():
@@ -53,6 +53,7 @@ def get_args_parser():
 
 def preprocess(feed_dict, args):
     images = feed_dict["images"].squeeze(1)
+    # images = [feed_dict["front_view", feed_dict["side_images"], feed_dict["top_images"]]]
     # num_samples = 1000 
     # num_samples = 32*32*32
     indices = torch.randperm(64*64*64)[:args.num_samples]  
