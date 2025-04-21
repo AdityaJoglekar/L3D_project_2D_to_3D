@@ -52,8 +52,13 @@ def get_args_parser():
 
 
 def preprocess(feed_dict, args):
-    images = feed_dict["images"].squeeze(1)
-    # images = [feed_dict["front_view", feed_dict["side_images"], feed_dict["top_images"]]]
+    # images = feed_dict["images"].squeeze(1)
+    # images_list = torch.tensor([torch.tensor(feed_dict["front_images"]).squeeze(1), 
+    #                             torch.tensor(feed_dict["side_images"]).squeeze(1), 
+    #                             torch.tensor(feed_dict["top_images"]).squeeze(1)]).to(args.device)
+    images_list = torch.tensor(np.array([feed_dict["front_images"].squeeze(1),
+                                         feed_dict["side_images"].squeeze(1),
+                                         feed_dict["top_images"].squeeze(1)]))
     # num_samples = 1000 
     # num_samples = 32*32*32
     indices = torch.randperm(64*64*64)[:args.num_samples]  
@@ -70,11 +75,7 @@ def preprocess(feed_dict, args):
         ground_truth_3d = feed_dict["voxels"].float()
 
         ground_truth_3d = ground_truth_3d.reshape(args.batch_size,-1)[:,indices]  
-    if args.load_feat:
-        feats = torch.stack(feed_dict["feats"])
-        return feats.to(args.device), ground_truth_3d.to(args.device)
-    else:
-        return images.to(args.device), ground_truth_3d.to(args.device), indices
+        return images_list.to(args.device), ground_truth_3d.to(args.device), indices
 
 
 def calculate_loss(predictions, ground_truth, args):
@@ -227,6 +228,7 @@ def train_model(args):
         print(feed_dict.keys())
 
         images_gt, ground_truth_3d, indices = preprocess(feed_dict, args)
+        print("Shapes : ", images_gt.shape, ground_truth_3d.shape, indices.shape)
         print(ground_truth_3d.shape)
         read_time = time.time() - read_start_time
 

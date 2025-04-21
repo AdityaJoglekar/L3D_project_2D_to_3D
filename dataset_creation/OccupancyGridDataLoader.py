@@ -14,12 +14,10 @@ class OccupancyGridDataset(Dataset):
         self.grid_transform = grid_transform
         self.samples = []
 
-        print("Loading split file...")
         try:
             with open(split_path, 'r') as f:
                 split_data = json.load(f)
             allowed_base_names = set(split_data[split_name])
-            print(f"Number of allowed base names in '{split_name}': {len(allowed_base_names)}")
         except FileNotFoundError:
             print(f"Error: Split file not found at {split_path}")
             return
@@ -27,15 +25,12 @@ class OccupancyGridDataset(Dataset):
             print(f"Error: Could not decode JSON from {split_path}")
             return
 
-        print("Mapping occupancy files...")
         occ_map = {
             os.path.splitext(f)[0]: os.path.join(occupancy_dir, f)
             for f in os.listdir(occupancy_dir)
             if f.endswith('.npy') and os.path.splitext(f)[0] in allowed_base_names
         }
-        print(f"Number of matching occupancy files: {len(occ_map)}")
 
-        print("Grouping image files...")
         image_groups = {}
         for img_file in os.listdir(image_dir):
             if not img_file.endswith('.png'):
@@ -47,9 +42,7 @@ class OccupancyGridDataset(Dataset):
                     if base_name not in image_groups:
                         image_groups[base_name] = {}
                     image_groups[base_name][view_type] = os.path.join(image_dir, img_file)
-        print(f"Number of base names with associated images: {len(image_groups)}")
 
-        print("Creating samples...")
         for base_name, occ_path in occ_map.items():
             if base_name in image_groups and 'front' in image_groups[base_name] and 'right' in image_groups[base_name] and 'top' in image_groups[base_name]:
                 self.samples.append({
@@ -57,7 +50,6 @@ class OccupancyGridDataset(Dataset):
                     'img_paths': image_groups[base_name],
                     'base_name': base_name
                 })
-        print(f"Number of samples created: {len(self.samples)}")
 
         self.samples.sort(key=lambda x: x['base_name'])
 
@@ -76,7 +68,6 @@ class OccupancyGridDataset(Dataset):
 
         views = {}
         for view_type, img_path in sample['img_paths'].items():
-            print(view_type)
             # Load image view
             view = Image.open(img_path).convert("RGB")
             if self.transform:
@@ -98,7 +89,7 @@ def custom_collate_fn(batch):
     side_view = torch.stack([item['side_view'] for item in batch])
     top_view = torch.stack([item['top_view'] for item in batch])
     return {
-        'occupancy': occupancy,  # renaming to match your training script
+        'voxels': occupancy,  # renaming to match your training script
         'front_images': front_view,
         'side_images': side_view,  
         'top_images': top_view,    
